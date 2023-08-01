@@ -5,7 +5,8 @@ import jax, jax.numpy as jnp
 from jax import grad, jit, vmap
 from jax import random
 import transformers
-import flax.linen as nn
+import flax, flax.linen as nn
+from clu import parameter_overview
 
 from quant import *
 from sparsegpt import *
@@ -52,23 +53,22 @@ def opt_sequential(model, dataloader, dev):
     cache = {'i': 0, 'attention_mask': None}
 
     class Catcher(nn.Module):
-        def __init__(self, module):
+        def setup(self, module):
             super().__init__()
             self.module = module
-        def forward(self, inp, **kwargs):
+        def __call__(self, inp, **kwargs):
             inps[cache['i']] = inp
             cache['i'] += 1
             cache['attention_mask'] = kwargs['attention_mask']
             raise ValueError
-    layers[0] = Catcher(layers[0])
+    layers['0'] = Catcher(layers['0'])
     for batch in dataloader:
         try:
-            model(batch[0].to(dev))
+            model(jax.device_put((batch[0])))
         except ValueError:
             pass
     layers[0] = layers[0].module
 
-    layers[0] = layers[0].cpu()
     params['embed_positions']['embedding'] = jax.device_get(params['embed_positions']['embedding'])
     params['embed_tokens']['embedding'] = jax.device_get(params['embed_tokens']['embedding'])
     if 'project_out' in params and params['project_out']:
@@ -317,7 +317,12 @@ if __name__ == '__main__':
         wandb.init(config=args)
 
     model = get_opt(args.model)
-    model.eval()
+
+    params = model.params
+    params = flax.core.freeze(params)
+
+    ## visualize model structure
+    # print(parameter_overview.get_parameter_overview(params))
 
     dataloader, testloader = get_loaders(
         args.dataset, nsamples=args.nsamples, seed=args.seed, model=args.model, seqlen=model.seqlen
