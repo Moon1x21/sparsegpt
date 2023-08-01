@@ -3,6 +3,8 @@ import time
 
 import torch
 import torch.nn as nn
+import jax 
+import jax.numpy as jnp
 import transformers
 
 from quant import *
@@ -18,15 +20,15 @@ class SparseGPT:
 
     def __init__(self, layer):
         self.layer = layer
-        self.dev = self.layer.weight.device
+        self.dev = jax.device_get(self.layer.weight)
         W = layer.weight.data.clone()
         if isinstance(self.layer, nn.Conv2d):
             W = W.flatten(1)
         if isinstance(self.layer, transformers.Conv1D):
             W = W.t()
-        self.rows = W.shape[0]
-        self.columns = W.shape[1]
-        self.H = torch.zeros((self.columns, self.columns), device=self.dev)
+        self.rows = jnp.shape(W)[0]
+        self.columns = jnp.shape(W)[1]
+        self.H = jnp.zeros((self.columns, self.columns))
         self.nsamples = 0
 
     def add_batch(self, inp, out, blocksize=1024):
